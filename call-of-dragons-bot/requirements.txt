@@ -1,0 +1,6 @@
+selenium
+adb-shell
+requests
+pyautogui
+opencv-python
+numpy
