@@ -1,16 +1,17 @@
 import sys
 from PyQt5.QtWidgets import QApplication, QWidget, QPushButton, QVBoxLayout, QMessageBox
+from PyQt5.QtCore import QThread, pyqtSignal
 import subprocess
 
-class LDPlayerController(QWidget):
-    def __init__(self):
+class EmulatorWorker(QThread):
+    log_signal = pyqtSignal(str)
+
+    def __init__(self, emulator_queue, ldconsole_path):
         super().__init__()
-        self.is_running = False
-        self.is_paused = False
-        self.ldconsole_path = r'C:\LDPlayer\LDPlayer9\ldconsole.exe'  # Update this path if needed
-        # List of emulator names to launch (update as needed)
-        self.emulator_queue = ['my.cod.farms.01', 'my.cod.farms.02']
-        self.init_ui()
+        self.emulator_queue = emulator_queue
+        self.ldconsole_path = ldconsole_path
+        self._is_running = True
+
     def run_ldconsole(self, args):
         cmd = [self.ldconsole_path] + args
         try:
@@ -21,6 +22,58 @@ class LDPlayerController(QWidget):
         except Exception as e:
             return f"Exception: {str(e)}"
 
+    def run(self):
+        import time
+        for emulator_name in self.emulator_queue:
+            if not self._is_running:
+                break
+            output = self.run_ldconsole(['launch', '--name', emulator_name])
+            self.log_signal.emit(f"{emulator_name}: {output}")
+            self.log_signal.emit(f"Waiting 15 seconds for emulator to load...")
+            time.sleep(15)
+            # Check if emulator is running
+            while True:
+                status = self.run_ldconsole(['isrunning', '--name', emulator_name])
+                self.log_signal.emit(f"Checking if {emulator_name} is running: {status.strip()}")
+                if 'running' in status.lower():
+                    break
+                self.log_signal.emit(f"{emulator_name} not running yet, waiting 15 seconds...")
+                time.sleep(15)
+            # Step 2: Launch Game
+            game_output = self.run_ldconsole(['runapp', '--name', emulator_name, '--packagename', 'com.farlightgames.samo.gp'])
+            if "Error:" in game_output or "Exception:" in game_output:
+                self.log_signal.emit(f"{emulator_name} (Game Launch Error): {game_output}")
+            else:
+                self.log_signal.emit(f"{emulator_name} (Game Launch Output): {game_output}")
+            # Step 3: Wait 60 seconds before first game running check
+            self.log_signal.emit(f"{emulator_name}: Waiting 60 seconds before checking if game is running...")
+            time.sleep(60)
+            game_loaded = False
+            for i in range(6):  # 6 x 5s = 30s
+                adb_output = self.run_ldconsole(['adb', '--name', emulator_name, '--command', 'shell ps | grep com.farlightgames.samo.gp'])
+                if 'com.farlightgames.samo.gp' in adb_output:
+                    self.log_signal.emit(f"{emulator_name}: Game is running!")
+                    game_loaded = True
+                    break
+                else:
+                    self.log_signal.emit(f"{emulator_name}: Game not running yet, waiting 5 seconds...")
+                    time.sleep(5)
+            if not game_loaded:
+                self.log_signal.emit(f"{emulator_name}: Game did not start within 90 seconds.")
+            # Step 4: Let game run for 30 seconds
+            if game_loaded:
+                self.log_signal.emit(f"{emulator_name}: Letting game run for 30 seconds...")
+                time.sleep(30)
+            # Step 5: Close the game
+            close_game = self.run_ldconsole(['killapp', '--name', emulator_name, '--packagename', 'com.farlightgames.samo.gp'])
+            self.log_signal.emit(f"{emulator_name} (Game Closed): {close_game}")
+            # Step 6: Close Emulator
+            output = self.run_ldconsole(['quit', '--name', emulator_name])
+            self.log_signal.emit(f"{emulator_name} (Emulator Closed): {output}")
+
+class LDPlayerController(QWidget):
+    def log(self, message):
+        print(message)
     def init_ui(self):
         self.setWindowTitle('CoD BoT')
         self.setMinimumWidth(600)
@@ -54,17 +107,93 @@ class LDPlayerController(QWidget):
         self.end_btn.setEnabled(False)
         main_layout.addWidget(self.end_btn)
 
-
-
         self.setLayout(main_layout)
+    log_signal = pyqtSignal(str)
 
-    def log(self, message):
-        # Filter out LDPlayer help/usage text
-        if ("Usage:" in message or "Command Line Management Interface" in message):
-            return
-        print(message)
+    def __init__(self, emulator_queue, ldconsole_path):
+        super().__init__()
+        self.emulator_queue = emulator_queue
+        self.ldconsole_path = ldconsole_path
+        self._is_running = True
 
+    def run_ldconsole(self, args):
+        cmd = [self.ldconsole_path] + args
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                return f"Error: {result.stderr}"
+            return result.stdout
+        except Exception as e:
+            return f"Exception: {str(e)}"
 
+    def run(self):
+        import time
+        for emulator_name in self.emulator_queue:
+            if not self._is_running:
+                break
+            output = self.run_ldconsole(['launch', '--name', emulator_name])
+            self.log_signal.emit(f"{emulator_name}: {output}")
+            self.log_signal.emit(f"Waiting 15 seconds for emulator to load...")
+            time.sleep(15)
+            # Check if emulator is running
+            while True:
+                status = self.run_ldconsole(['isrunning', '--name', emulator_name])
+                self.log_signal.emit(f"Checking if {emulator_name} is running: {status.strip()}")
+                if 'running' in status.lower():
+                    break
+                self.log_signal.emit(f"{emulator_name} not running yet, waiting 15 seconds...")
+                time.sleep(15)
+            # Step 2: Launch Game
+            game_output = self.run_ldconsole(['runapp', '--name', emulator_name, '--packagename', 'com.farlightgames.samo.gp'])
+            if "Error:" in game_output or "Exception:" in game_output:
+                self.log_signal.emit(f"{emulator_name} (Game Launch Error): {game_output}")
+            else:
+                self.log_signal.emit(f"{emulator_name} (Game Launch Output): {game_output}")
+            # Step 3: Wait 60 seconds before first game running check
+            self.log_signal.emit(f"{emulator_name}: Waiting 60 seconds before checking if game is running...")
+            time.sleep(60)
+            game_loaded = False
+            for i in range(6):  # 6 x 5s = 30s
+                adb_output = self.run_ldconsole(['adb', '--name', emulator_name, '--command', 'shell ps | grep com.farlightgames.samo.gp'])
+                if 'com.farlightgames.samo.gp' in adb_output:
+                    self.log_signal.emit(f"{emulator_name}: Game is running!")
+                    game_loaded = True
+                    break
+                else:
+                    self.log_signal.emit(f"{emulator_name}: Game not running yet, waiting 5 seconds...")
+                    time.sleep(5)
+            if not game_loaded:
+                self.log_signal.emit(f"{emulator_name}: Game did not start within 90 seconds.")
+            # Step 4: Let game run for 30 seconds
+            if game_loaded:
+                self.log_signal.emit(f"{emulator_name}: Letting game run for 30 seconds...")
+                time.sleep(30)
+            # Step 5: Close the game
+            close_game = self.run_ldconsole(['killapp', '--name', emulator_name, '--packagename', 'com.farlightgames.samo.gp'])
+            self.log_signal.emit(f"{emulator_name} (Game Closed): {close_game}")
+            # Step 6: Close Emulator
+            output = self.run_ldconsole(['quit', '--name', emulator_name])
+            self.log_signal.emit(f"{emulator_name} (Emulator Closed): {output}")
+    def __init__(self):
+        super().__init__()
+        self.is_running = False
+        self.is_paused = False
+        self.ldconsole_path = r'C:\LDPlayer\LDPlayer9\ldconsole.exe'  # Update this path if needed
+        # List of emulator names to launch (update as needed)
+        self.emulator_queue = ['my.cod.farms.01', 'my.cod.farms.02']
+        self.init_ui()
+    def run_ldconsole(self, args):
+        cmd = [self.ldconsole_path] + args
+        def start_app(self):
+            if not self.is_running:
+                self.is_running = True
+                self.is_paused = False
+                self.start_btn.setEnabled(False)
+                self.pause_btn.setEnabled(True)
+                self.end_btn.setEnabled(True)
+                self.worker = EmulatorWorker(self.emulator_queue, self.ldconsole_path)
+                self.worker.log_signal.connect(self.log)
+                self.worker.start()
 
     def start_app(self):
         import time
