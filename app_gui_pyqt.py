@@ -108,10 +108,19 @@ class LDPlayerController(QWidget):
                         time.sleep(5)
                 if not game_loaded:
                     self.log(f"{emulator_name}: Game did not start within 90 seconds.")
-                # Step 4: Let game run for 30 seconds
+                # Step 4: Take 10 screen captures, 10 seconds apart
                 if game_loaded:
-                    self.log(f"{emulator_name}: Letting game run for 30 seconds...")
-                    time.sleep(30)
+                    for capture_num in range(1, 11):
+                        screenshot_path = f"screenshot_{emulator_name}_{capture_num}.png"
+                        adb_screencap_cmd = f"shell screencap -p /sdcard/{screenshot_path}"
+                        pull_cmd = f"pull /sdcard/{screenshot_path} ./"
+                        # Take screenshot
+                        screencap_output = self.run_ldconsole(['adb', '--name', emulator_name, '--command', adb_screencap_cmd])
+                        self.log(f"{emulator_name}: Screenshot {capture_num} taken: {screencap_output}")
+                        # Pull screenshot to local
+                        pull_output = self.run_ldconsole(['adb', '--name', emulator_name, '--command', pull_cmd])
+                        self.log(f"{emulator_name}: Screenshot {capture_num} pulled: {pull_output}")
+                        time.sleep(10)
                 # Step 5: Close the game
                 close_game = self.run_ldconsole(['killapp', '--name', emulator_name, '--packagename', 'com.farlightgames.samo.gp'])
                 self.log(f"{emulator_name} (Game Closed): {close_game}")
